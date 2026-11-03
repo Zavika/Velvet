@@ -1,0 +1,9 @@
+build/
+Pods/
+Payload/
+*.ipa
+*.xcodeproj/
+*.xcworkspace/
+Podfile.lock
+Velvet/Info.plist
+.DS_Store

@@ -1,0 +1,52 @@
+name: Build iPhone app
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Velvet/**"
+      - "project.yml"
+      - "Podfile"
+      - ".github/workflows/ios.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Install VLC player library
+        run: pod install --repo-update
+
+      - name: Build
+        run: |
+          xcodebuild -workspace Velvet.xcworkspace -scheme Velvet \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath build -quiet \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package .ipa
+        run: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/Velvet.app Payload/
+          zip -qry Velvet.ipa Payload
+          ls -lh Velvet.ipa
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "build-${{ github.run_number }}" Velvet.ipa \
+            --title "Velvet build ${{ github.run_number }}" \
+            --notes "Install on iPhone with Sideloadly." \
+            --latest
