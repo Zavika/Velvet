@@ -449,28 +449,41 @@ async function seriesView(series, main, seasonId) {
 }
 
 async function sourcesView(it, main, autoplay) {
-  main.innerHTML = `<h3 class="sec-h">Streams</h3><div class="spinner" style="margin:20px auto"></div>`;
+  main.innerHTML = `<h3 class="sec-h">Streams</h3><div class="spinner" style="margin:20px auto"></div><p class="empty" id="srcWait" style="padding-top:0">Finding streams…</p>`;
+  const slow = setTimeout(() => { const w = $("#srcWait"); if (w) w.textContent = "Still searching. The server looks streams up live, so this can take up to a minute."; }, 10000);
+  const ctl = new AbortController(), kill = setTimeout(() => ctl.abort(), 90000);
   let info;
   try {
-    info = await api(`/Items/${it.Id}/PlaybackInfo?userId=${U()}`, { method: "POST", body: JSON.stringify({ UserId: U(), AutoOpenLiveStream: false }) })
-      .catch(() => api(`/Items/${it.Id}/PlaybackInfo?userId=${U()}`));
-  } catch (e) { main.innerHTML = `<h3 class="sec-h">Streams</h3><p class="empty">Couldn't find streams: ${esc(e.message)}</p>`; return; }
-  const srcs = info?.MediaSources || [];
+    const p = `/Items/${it.Id}/PlaybackInfo?userId=${U()}`;
+    info = await api(p, { method: "POST", body: JSON.stringify({ UserId: U(), AutoOpenLiveStream: false }), signal: ctl.signal })
+      .catch(e => { if (e.name === "AbortError") throw e; return api(p, { signal: ctl.signal }); });
+  } catch (e) {
+    main.innerHTML = `<h3 class="sec-h">Streams</h3><p class="empty">${e.name === "AbortError" ? "The server took too long to find streams. Close this and try again." : "Couldn't find streams: " + esc(e.message)}</p>`;
+    return;
+  } finally { clearTimeout(slow); clearTimeout(kill); }
+  // Safari only plays MP4/MOV with H.264 or HEVC; put those first, MKV and friends last
+  const rank = s => {
+    const v = (s.MediaStreams || []).find(m => m.Type === "Video");
+    const codec = (v?.Codec || "").toLowerCase(), text = `${s.Container || ""} ${s.Name || ""} ${s.Path || ""}`.toLowerCase();
+    if (/\bmkv\b|\.mkv|\bavi\b|webm/.test(text) || (codec && !/h264|avc|hevc|h265/.test(codec))) return 0;
+    if (/\bmp4\b|\.mp4|\bmov\b|\bm4v\b/.test(text)) return 2;
+    return 1;
+  };
+  const srcs = (info?.MediaSources || []).map((s, i) => ({ s, r: rank(s), i })).sort((a, b) => b.r - a.r || a.i - b.i);
   main.innerHTML = `<h3 class="sec-h">Streams</h3><div class="sources" id="srcs"></div>`;
-  srcs.forEach(s => {
+  srcs.forEach(({ s, r }) => {
     const v = (s.MediaStreams || []).find(m => m.Type === "Video");
     const codec = (v?.Codec || "").toLowerCase();
     const res = v?.Height ? (v.Height >= 2100 ? "4K" : v.Height + "p") : "";
-    const risky = (s.Container && /mkv|avi|webm/i.test(s.Container)) || (codec && !/h264|avc|hevc|h265/.test(codec));
     const b = document.createElement("button"); b.className = "src";
-    b.innerHTML = `<div style="min-width:0"><div class="n">${esc(s.Name || it.Name)}${risky ? '<span class="tag">may not play</span>' : ""}</div>
+    b.innerHTML = `<div style="min-width:0"><div class="n">${esc(s.Name || it.Name)}${r === 0 ? '<span class="tag">won\'t play in Safari</span>' : ""}</div>
       <div class="x">${[res, codec.toUpperCase(), (s.Container || "").toUpperCase(), fmtSize(s.Size)].filter(Boolean).map(esc).join(" · ")}</div></div>
       <span class="play">${ICON_PLAY}</span>`;
     b.onclick = () => play(it, s, info.PlaySessionId);
     $("#srcs").appendChild(b);
   });
   if (!srcs.length) $("#srcs").innerHTML = `<p class="empty">No streams found for this title.</p>`;
-  else if (autoplay) play(it, srcs[0], info.PlaySessionId);
+  else if (autoplay && srcs[0].r > 0) play(it, srcs[0].s, info.PlaySessionId);
 }
 
 /* ---------- player ---------- */
@@ -500,16 +513,19 @@ function play(it, s, sid) {
   const isHls = /\.m3u8/i.test(url);
   if (isHls && !v.canPlayType("application/vnd.apple.mpegurl") && window.Hls?.isSupported()) {
     hls = new Hls(); hls.loadSource(url); hls.attachMedia(v);
-  } else v.src = url;
+  } else { v.src = url; v.play().catch(() => {}); }  // play() inside the tap so iOS allows sound
+  const fail = "Safari can't play this stream. It's probably MKV. Close the player and pick another one, or use the iPhone app.";
   v.onloadedmetadata = () => { if (resume > 5 && resume < v.duration - 10) v.currentTime = resume; v.play().catch(() => {}); };
-  v.onerror = () => { $("#pmsg").textContent = "This stream won't play in the browser (likely MKV or an unsupported codec). Try another stream."; };
+  v.onplaying = () => { clearTimeout(P?.watch); $("#pmsg").textContent = ""; };
+  v.onerror = () => { $("#pmsg").textContent = fail; };
+  P.watch = setTimeout(() => { if (P && !v.currentTime && v.readyState < 3) $("#pmsg").textContent = fail; }, 20000);
   report("");
   P.timer = setInterval(() => report("/Progress"), 10000);
   v.onpause = () => report("/Progress");
 }
 function stopPlayer() {
   const v = $("#vid");
-  if (P) { clearInterval(P.timer); report("/Stopped"); }
+  if (P) { clearInterval(P.timer); clearTimeout(P.watch); report("/Stopped"); }
   P = null; v.pause(); if (hls) { hls.destroy(); hls = null; }
   v.removeAttribute("src"); v.load();
   $("#player").hidden = true;
