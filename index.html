@@ -517,7 +517,10 @@ function play(it, s, sid) {
   const fail = "Safari can't play this stream. It's probably MKV. Close the player and pick another one, or use the iPhone app.";
   v.onloadedmetadata = () => { if (resume > 5 && resume < v.duration - 10) v.currentTime = resume; v.play().catch(() => {}); };
   v.onplaying = () => { clearTimeout(P?.watch); $("#pmsg").textContent = ""; };
-  v.onerror = () => { $("#pmsg").textContent = fail; };
+  v.onerror = () => {
+    const c = v.error?.code;
+    $("#pmsg").textContent = c === 2 ? "The stream stopped loading. Check your connection or pick another stream." : fail;
+  };
   P.watch = setTimeout(() => { if (P && !v.currentTime && v.readyState < 3) $("#pmsg").textContent = fail; }, 20000);
   report("");
   P.timer = setInterval(() => report("/Progress"), 10000);
