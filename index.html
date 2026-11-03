@@ -25,7 +25,8 @@
   color-scheme:dark;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{margin:0;height:100%;background:var(--ink);color:var(--text);font:15px/1.45 var(--body)}
+html,body{margin:0;height:100%;background:var(--ink);color:var(--text);font:15px/1.45 var(--body);overscroll-behavior:none}
+body.typing .tabbar{display:none}
 button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;padding:0}
 input{font:inherit;color:inherit}
 img{max-width:100%;display:block}
@@ -263,7 +264,6 @@ function show(v) {
   document.querySelectorAll(".tab").forEach(t => t.setAttribute("aria-selected", t.dataset.v === v));
   window.scrollTo(0, 0);
   if (v === "vLib" && !$("#libChips").children.length) loadLibs();
-  if (v === "vSearch") setTimeout(() => $("#q").focus(), 50);
 }
 
 /* ---------- cards ---------- */
@@ -364,6 +364,9 @@ $("#libMoreBtn").onclick = () => browse(lib.parent, $("#vLib .page-h").textConte
 
 /* ---------- search ---------- */
 let sT;
+// keep the tab bar from riding up on the keyboard
+document.addEventListener("focusin", e => { if (e.target.matches("input")) document.body.classList.add("typing"); });
+document.addEventListener("focusout", () => document.body.classList.remove("typing"));
 $("#q").addEventListener("input", e => {
   clearTimeout(sT);
   const term = e.target.value.trim();
